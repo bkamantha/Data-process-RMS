@@ -12,6 +12,7 @@ import streamlit as st
 
 from analysis.breakeven import DEFAULT_BREAKEVEN_PATH, load_breakeven, save_breakeven
 from analysis.data_loader import load_merged_reservations
+from analysis.forecast import forecast_next_month
 from analysis.math_mcp import DEFAULT_MATHEMATICS_MCP_URL, MathematicsMCPClient
 from analysis.mcp_metrics import enrich_report_with_mcp
 from analysis.metrics import build_report, distinct_room_types
@@ -324,8 +325,8 @@ with oc3:
     fig.update_traces(textposition="inside", textinfo="percent+label")
     st.plotly_chart(fig, use_container_width=True)
 
-tab_type, tab_avail, tab_daily, tab_breakeven, tab_detail = st.tabs(
-    ["Room type summary", "Room availability", "Daily pricing", "Breakeven config", "Reservations"]
+tab_type, tab_avail, tab_daily, tab_forecast, tab_breakeven, tab_detail = st.tabs(
+    ["Room type summary", "Room availability", "Daily pricing", "Forecast", "Breakeven config", "Reservations"]
 )
 
 with tab_type:
@@ -610,6 +611,86 @@ with tab_daily:
             st.plotly_chart(fig, use_container_width=True)
 
         st.dataframe(report.daily_pricing, use_container_width=True, hide_index=True)
+
+with tab_forecast:
+    st.markdown(
+        "Statistical forecast of **next month** availability using monthly occupancy history "
+        "(weighted moving average + linear trend, blended with Holt linear smoothing when enough data exists)."
+    )
+    forecast = forecast_next_month(frame)
+    fc1, fc2, fc3, fc4 = st.columns(4)
+    fc1.metric("Forecast month", forecast.target_label)
+    fc2.metric("Predicted occupied nights", f"{forecast.predicted_occupied_nights:,.0f}")
+    fc3.metric("Predicted vacant nights", f"{forecast.predicted_vacant_nights:,.0f}")
+    fc4.metric("Predicted occupancy", f"{forecast.predicted_occupancy_pct:.1f}%")
+
+    st.caption(
+        f"Method: {forecast.method} · "
+        f"95% interval: {forecast.lower_occupied_nights:,.0f} – {forecast.upper_occupied_nights:,.0f} occupied nights · "
+        f"Based on {forecast.history_months} months of history"
+    )
+
+    hist = forecast.monthly_history.copy()
+    hist["kind"] = "Actual"
+    future_row = pd.DataFrame(
+        [
+            {
+                "month": forecast.target_month,
+                "occupied_nights": forecast.predicted_occupied_nights,
+                "vacant_nights": forecast.predicted_vacant_nights,
+                "occupancy_pct": forecast.predicted_occupancy_pct,
+                "kind": "Forecast",
+            }
+        ]
+    )
+    chart_df = pd.concat(
+        [
+            hist[["month", "occupied_nights", "vacant_nights", "occupancy_pct", "kind"]],
+            future_row,
+        ],
+        ignore_index=True,
+    )
+
+    ff1, ff2 = st.columns(2)
+    with ff1:
+        fig = px.line(
+            chart_df,
+            x="month",
+            y="occupied_nights",
+            color="kind",
+            markers=True,
+            title="Monthly occupied nights — actual vs forecast",
+        )
+        fig.update_layout(xaxis_tickangle=-30)
+        st.plotly_chart(fig, use_container_width=True)
+    with ff2:
+        fig = px.line(
+            chart_df,
+            x="month",
+            y="occupancy_pct",
+            color="kind",
+            markers=True,
+            title="Monthly occupancy % — actual vs forecast",
+        )
+        fig.update_layout(xaxis_tickangle=-30)
+        st.plotly_chart(fig, use_container_width=True)
+
+    st.subheader("Room type forecast")
+    if forecast.room_type_forecast.empty:
+        st.info("Not enough history for room-type breakdown.")
+    else:
+        type_fc = forecast.room_type_forecast.copy()
+        type_fc["room_type_short"] = type_fc["room_type"].map(_shorten_room_type)
+        st.dataframe(type_fc, use_container_width=True, hide_index=True)
+        fig = px.bar(
+            type_fc,
+            x="room_type_short",
+            y="predicted_vacant_nights",
+            color="predicted_occupancy_pct",
+            title="Predicted vacant nights by room type (color = occupancy %)",
+        )
+        fig.update_layout(xaxis_tickangle=-30)
+        st.plotly_chart(fig, use_container_width=True)
 
 with tab_breakeven:
     st.markdown(

@@ -9,7 +9,7 @@ Hotel reservation analysis framework for RMS **Checked Out** and **Checked In** 
 - **Availability loss** (optional) = vacant nights × breakeven — off by default because it usually dominates pricing loss
 - **Pricing loss** = nights sold below breakeven rate
 - **Daily pricing** view by date and room type to improve rates
-- **Mathematics MCP** — summary metrics verified via [mathematics.fastmcp.app](https://mathematics.fastmcp.app/mcp)
+- **Forecast** tab — statistical prediction of next month's occupied/vacant nights and occupancy %
 
 ## Setup
 
@@ -32,7 +32,7 @@ Place your exports in `data/`:
 ```bash
 python run_analysis.py --period 1_week
 python run_analysis.py --all-periods
-python run_analysis.py --period 1_month --pdf reports/report.pdf
+python run_analysis.py --period 1_month --forecast
 ```
 
 **Windows:** `run_analysis.bat --period 1_week`

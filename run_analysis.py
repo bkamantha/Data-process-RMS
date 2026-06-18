@@ -9,6 +9,7 @@ from pathlib import Path
 
 from analysis.breakeven import DEFAULT_BREAKEVEN_PATH, load_breakeven
 from analysis.data_loader import load_merged_reservations
+from analysis.forecast import forecast_next_month
 from analysis.metrics import build_all_period_reports, build_report
 from analysis.math_mcp import DEFAULT_MATHEMATICS_MCP_URL, MathematicsMCPClient
 from analysis.mcp_metrics import enrich_report_with_mcp
@@ -42,6 +43,11 @@ def parse_args() -> argparse.Namespace:
         "--availability-loss",
         action="store_true",
         help="Include availability loss USD (vacant nights × breakeven). Off by default.",
+    )
+    parser.add_argument(
+        "--forecast",
+        action="store_true",
+        help="Print next-month availability statistical forecast",
     )
     return parser.parse_args()
 
@@ -110,6 +116,19 @@ def main() -> None:
         pdf_path.parent.mkdir(parents=True, exist_ok=True)
         pdf_path.write_bytes(build_pdf_report(report, mcp_summary=mcp_summary))
         print(f"Wrote {args.pdf}")
+
+    if args.forecast:
+        fc = forecast_next_month(frame)
+        print(f"\n=== Forecast: {fc.target_label} ===")
+        print(f"Method: {fc.method} ({fc.history_months} months history)")
+        print(f"Available nights: {fc.available_nights}")
+        print(f"Predicted occupied nights: {fc.predicted_occupied_nights:,.1f}")
+        print(f"Predicted vacant nights: {fc.predicted_vacant_nights:,.1f}")
+        print(f"Predicted occupancy: {fc.predicted_occupancy_pct:.1f}%")
+        print(f"95% interval: {fc.lower_occupied_nights:,.1f} – {fc.upper_occupied_nights:,.1f} occupied nights")
+        if not fc.room_type_forecast.empty:
+            print("\nBy room type:")
+            print(fc.room_type_forecast.to_string(index=False))
 
 
 if __name__ == "__main__":

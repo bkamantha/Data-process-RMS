@@ -2,7 +2,7 @@
 
 from analysis.availability import build_availability_summary, build_daily_pricing
 from analysis.breakeven import DEFAULT_BREAKEVEN_PATH, load_breakeven, save_breakeven
-from analysis.data_loader import load_merged_reservations
+from analysis.forecast import MonthlyAvailabilityForecast, build_monthly_history, forecast_next_month
 from analysis.metrics import AnalysisReport, build_report, build_all_period_reports, distinct_room_types
 from analysis.math_mcp import DEFAULT_MATHEMATICS_MCP_URL, MathematicsMCPClient
 from analysis.mcp_metrics import MCPSummary, enrich_report_with_mcp
@@ -31,6 +31,9 @@ __all__ = [
     "DEFAULT_MATHEMATICS_MCP_URL",
     "MCPSummary",
     "enrich_report_with_mcp",
+    "forecast_next_month",
+    "build_monthly_history",
+    "MonthlyAvailabilityForecast",
     "Period",
     "DateRangeMode",
     "DateWindow",
