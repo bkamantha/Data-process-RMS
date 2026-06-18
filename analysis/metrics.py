@@ -1,4 +1,4 @@
-"""Aggregate category, tariff, room-type metrics, and baseline loss (USD)."""
+"""Aggregate category, tariff, breakeven, and availability loss metrics."""
 
 from __future__ import annotations
 
@@ -6,18 +6,30 @@ from dataclasses import dataclass
 
 import pandas as pd
 
-from analysis.baselines import apply_loss_columns, load_baselines, merge_baselines
+from analysis.availability import (
+    build_availability_summary,
+    build_daily_pricing,
+    build_room_type_availability,
+    window_day_count,
+)
+from analysis.breakeven import apply_reservation_metrics, attach_breakeven, load_breakeven
 from analysis.periods import DateWindow, Period, resolve_period
 
 
 @dataclass
 class AnalysisReport:
     window: DateWindow
+    period_days: int
     total_reservations: int
     total_room_nights: int
+    total_available_nights: int
+    total_vacant_nights: int
+    total_pricing_loss_usd: float
+    total_availability_loss_usd: float
     total_loss_usd: float
-    category_usage: pd.DataFrame
-    room_type_usage: pd.DataFrame
+    room_type_summary: pd.DataFrame
+    room_availability: pd.DataFrame
+    daily_pricing: pd.DataFrame
     reservations: pd.DataFrame
 
     def to_dict(self) -> dict:
@@ -28,121 +40,90 @@ class AnalysisReport:
                 "start": self.window.start.isoformat(),
                 "end": self.window.end.isoformat(),
             },
+            "period_days": self.period_days,
             "total_reservations": self.total_reservations,
             "total_room_nights": int(self.total_room_nights),
+            "total_available_nights": int(self.total_available_nights),
+            "total_vacant_nights": int(self.total_vacant_nights),
+            "total_pricing_loss_usd": round(self.total_pricing_loss_usd, 2),
+            "total_availability_loss_usd": round(self.total_availability_loss_usd, 2),
             "total_loss_usd": round(self.total_loss_usd, 2),
-            "category_usage": self.category_usage.to_dict(orient="records"),
-            "room_type_usage": self.room_type_usage.to_dict(orient="records"),
+            "room_type_summary": self.room_type_summary.to_dict(orient="records"),
+            "room_availability": self.room_availability.to_dict(orient="records"),
+            "daily_pricing": self.daily_pricing.to_dict(orient="records"),
         }
 
 
-def _nights_pct(nights: pd.Series, total_nights: int) -> pd.Series:
-    if total_nights <= 0:
-        return pd.Series(0.0, index=nights.index)
-    return (nights / total_nights * 100).round(1)
-
-
-def _category_metrics(frame: pd.DataFrame, total_nights: int) -> pd.DataFrame:
-    grouped = (
-        frame.groupby("category", dropna=False)
-        .agg(
-            reservations=("res_no", "count"),
-            room_nights=("nights", "sum"),
-            avg_tariff=("tariff", "mean"),
-            avg_baseline=("baseline_tariff", "mean"),
-            tariff_count=("tariff", "count"),
-            loss_usd=("loss_usd", "sum"),
-            revenue_actual=("revenue_actual", "sum"),
-            revenue_baseline=("revenue_baseline", "sum"),
-        )
-        .reset_index()
-    )
-    grouped["nights_pct"] = _nights_pct(grouped["room_nights"], total_nights)
-    grouped["avg_tariff"] = grouped["avg_tariff"].round(2)
-    grouped["avg_baseline"] = grouped["avg_baseline"].round(2)
-    grouped["loss_usd"] = grouped["loss_usd"].round(2)
-    grouped = grouped.sort_values("room_nights", ascending=False)
-    return grouped[
-        [
-            "category",
-            "reservations",
-            "room_nights",
-            "nights_pct",
-            "avg_tariff",
-            "avg_baseline",
-            "loss_usd",
-            "revenue_actual",
-            "revenue_baseline",
-            "tariff_count",
-        ]
-    ]
-
-
-def _room_metrics(frame: pd.DataFrame, total_nights: int) -> pd.DataFrame:
-    grouped = (
-        frame.groupby(["category", "room"], dropna=False)
-        .agg(
-            reservations=("res_no", "count"),
-            room_nights=("nights", "sum"),
-            avg_tariff=("tariff", "mean"),
-            baseline_tariff=("baseline_tariff", "first"),
-            loss_usd=("loss_usd", "sum"),
-            revenue_actual=("revenue_actual", "sum"),
-            revenue_baseline=("revenue_baseline", "sum"),
-        )
-        .reset_index()
-    )
-    grouped["nights_pct"] = _nights_pct(grouped["room_nights"], total_nights)
-    grouped["avg_tariff"] = grouped["avg_tariff"].round(2)
-    grouped["loss_usd"] = grouped["loss_usd"].round(2)
-    grouped["revenue_actual"] = grouped["revenue_actual"].round(2)
-    grouped["revenue_baseline"] = grouped["revenue_baseline"].round(2)
-    return grouped.sort_values(["category", "room_nights"], ascending=[True, False])
+def _reservations_in_window(frame: pd.DataFrame, window: DateWindow) -> pd.DataFrame:
+    return frame[
+        (frame["arrive"] <= window.end) & (frame["depart"] > window.start)
+    ].copy()
 
 
 def build_report(
     frame: pd.DataFrame,
     period: Period,
     end_date=None,
-    baselines: pd.DataFrame | None = None,
-    baseline_path: str | None = None,
+    breakeven: pd.DataFrame | None = None,
+    breakeven_path: str | None = None,
 ) -> AnalysisReport:
-    if baselines is None:
-        baselines = load_baselines(baseline_path)
+    if breakeven is None:
+        breakeven = load_breakeven(breakeven_path)
 
-    enriched = apply_loss_columns(merge_baselines(frame, baselines))
-    filtered, window = resolve_period(enriched, period, end_date=end_date)
-    total_nights = int(filtered["nights"].sum())
+    enriched = attach_breakeven(frame, breakeven)
+    _, window = resolve_period(enriched, period, end_date=end_date)
+    period_days = window_day_count(window.start, window.end)
 
+    period_reservations = _reservations_in_window(enriched, window)
+    period_reservations = apply_reservation_metrics(period_reservations, window.start, window.end)
+
+    room_availability = build_availability_summary(
+        full_frame=enriched,
+        period_reservations=period_reservations,
+        breakeven=breakeven,
+        window_start=window.start,
+        window_end=window.end,
+    )
+    room_type_summary = build_room_type_availability(room_availability)
+    daily_pricing = build_daily_pricing(period_reservations, window.start, window.end)
+
+    total_occupied = int(room_availability["occupied_nights"].sum())
     return AnalysisReport(
         window=window,
-        total_reservations=len(filtered),
-        total_room_nights=total_nights,
-        total_loss_usd=float(filtered["loss_usd"].sum()),
-        category_usage=_category_metrics(filtered, total_nights),
-        room_type_usage=_room_metrics(filtered, total_nights),
-        reservations=filtered,
+        period_days=period_days,
+        total_reservations=len(period_reservations),
+        total_room_nights=total_occupied,
+        total_available_nights=int(room_availability["available_nights"].sum()),
+        total_vacant_nights=int(room_availability["vacant_nights"].sum()),
+        total_pricing_loss_usd=float(room_availability["pricing_loss_usd"].sum()),
+        total_availability_loss_usd=float(room_availability["availability_loss_usd"].sum()),
+        total_loss_usd=float(room_availability["total_loss_usd"].sum()),
+        room_type_summary=room_type_summary,
+        room_availability=room_availability,
+        daily_pricing=daily_pricing,
+        reservations=period_reservations,
     )
 
 
 def build_all_period_reports(
     frame: pd.DataFrame,
     end_date=None,
-    baselines: pd.DataFrame | None = None,
-    baseline_path: str | None = None,
+    breakeven: pd.DataFrame | None = None,
+    breakeven_path: str | None = None,
 ) -> dict[Period, AnalysisReport]:
-    if baselines is None:
-        baselines = load_baselines(baseline_path)
+    if breakeven is None:
+        breakeven = load_breakeven(breakeven_path)
     return {
-        period: build_report(frame, period, end_date=end_date, baselines=baselines)
+        period: build_report(frame, period, end_date=end_date, breakeven=breakeven)
         for period in Period
     }
 
 
-def distinct_rooms(frame: pd.DataFrame) -> pd.DataFrame:
+def distinct_room_types(frame: pd.DataFrame) -> pd.DataFrame:
     return (
-        frame[["category", "room"]]
+        frame[["category"]]
         .drop_duplicates()
-        .sort_values(["category", "room"])
+        .rename(columns={"category": "room_type"})
+        .sort_values("room_type")
         .reset_index(drop=True)
     )

@@ -8,9 +8,9 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-from analysis.baselines import DEFAULT_BASELINE_PATH, load_baselines, save_baselines
+from analysis.breakeven import DEFAULT_BREAKEVEN_PATH, load_breakeven, save_breakeven
 from analysis.data_loader import load_merged_reservations
-from analysis.metrics import build_report, distinct_rooms
+from analysis.metrics import build_report, distinct_room_types
 from analysis.periods import Period, reference_end_date
 
 DEFAULT_OUT = Path("data/Checked_Out.csv")
@@ -18,7 +18,7 @@ DEFAULT_IN = Path("data/Checked_In.csv")
 
 st.set_page_config(page_title="RMS Reservation Analysis", layout="wide")
 st.title("Hotel Reservation Analysis")
-st.caption("Checked Out + Checked In CSVs merged on Res No (guest names excluded)")
+st.caption("Breakeven-based revenue & availability loss across the selected period")
 
 
 @st.cache_data
@@ -27,26 +27,25 @@ def load_data(checked_out: str, checked_in: str) -> pd.DataFrame:
 
 
 @st.cache_data
-def load_baseline_data(path: str) -> pd.DataFrame:
-    return load_baselines(path)
+def load_breakeven_data(path: str) -> pd.DataFrame:
+    return load_breakeven(path)
 
 
 with st.sidebar:
     st.header("Inputs")
     checked_out_path = st.text_input("Checked Out CSV", value=str(DEFAULT_OUT))
     checked_in_path = st.text_input("Checked In CSV", value=str(DEFAULT_IN))
-    baseline_path = st.text_input("Room baselines CSV", value=str(DEFAULT_BASELINE_PATH))
+    breakeven_path = st.text_input("Room type breakeven CSV", value=str(DEFAULT_BREAKEVEN_PATH))
 
     if not Path(checked_out_path).exists() or not Path(checked_in_path).exists():
         st.error("One or both CSV paths do not exist.")
         st.stop()
 
     frame = load_data(checked_out_path, checked_in_path)
-    baselines = load_baseline_data(baseline_path)
+    breakeven = load_breakeven_data(breakeven_path)
     ref_end = reference_end_date(frame)
     st.metric("Reservations loaded", len(frame))
-    st.metric("With tariff data", int(frame["has_tariff"].sum()))
-    st.metric("Rooms with baseline", len(baselines))
+    st.metric("Room types", frame["category"].nunique())
 
     st.header("Time drill-down")
     period = st.radio(
@@ -57,84 +56,88 @@ with st.sidebar:
     )
     end_date = st.date_input("Window end date", value=ref_end.date())
 
-report = build_report(frame, period, end_date=end_date, baselines=baselines)
+report = build_report(frame, period, end_date=end_date, breakeven=breakeven)
 
 st.subheader(report.window.label)
-col1, col2, col3, col4 = st.columns(4)
-col1.metric("Reservations", report.total_reservations)
-col2.metric("Room nights", report.total_room_nights)
-col3.metric(
-    "Avg tariff (where available)",
-    f"${report.reservations['tariff'].mean():.2f}"
-    if report.reservations["tariff"].notna().any()
-    else "N/A",
-)
-col4.metric("Total loss (USD)", f"${report.total_loss_usd:,.2f}")
+c1, c2, c3, c4, c5 = st.columns(5)
+c1.metric("Period days", report.period_days)
+c2.metric("Occupied nights", report.total_room_nights)
+c3.metric("Vacant nights", report.total_vacant_nights)
+c4.metric("Availability loss", f"${report.total_availability_loss_usd:,.2f}")
+c5.metric("Total loss", f"${report.total_loss_usd:,.2f}")
 
-tab_category, tab_room, tab_baselines, tab_detail = st.tabs(
-    ["Category usage", "Room type usage", "Room baselines", "Reservation detail"]
+tab_type, tab_avail, tab_daily, tab_breakeven, tab_detail = st.tabs(
+    ["Room type summary", "Room availability", "Daily pricing", "Breakeven config", "Reservations"]
 )
 
-with tab_category:
-    left, right = st.columns([1, 1])
-    with left:
-        st.dataframe(report.category_usage, use_container_width=True, hide_index=True)
-    with right:
-        fig = px.bar(
-            report.category_usage,
-            x="category",
-            y="room_nights",
-            color="loss_usd",
-            title="Room nights by category (color = loss USD)",
-            labels={"room_nights": "Room nights", "loss_usd": "Loss USD"},
-        )
-        fig.update_layout(xaxis_tickangle=-35)
-        st.plotly_chart(fig, use_container_width=True)
-
-with tab_room:
-    left, right = st.columns([1, 1])
-    with left:
-        st.dataframe(report.room_type_usage, use_container_width=True, hide_index=True)
-    with right:
-        top_rooms = report.room_type_usage.head(20)
-        fig = px.bar(
-            top_rooms,
-            x="room",
-            y="room_nights",
-            color="loss_usd",
-            title="Top rooms by nights (color = loss USD)",
-        )
-        fig.update_layout(xaxis_tickangle=-35)
-        st.plotly_chart(fig, use_container_width=True)
-
-with tab_baselines:
+with tab_type:
     st.markdown(
-        "Set a **baseline tariff (USD per night)** for each room. "
-        "**Loss USD** = `(baseline − actual tariff) × nights` when tariff is below baseline."
+        "**Loss due to availability** = vacant nights × breakeven. "
+        "**Pricing loss** = nights sold below breakeven rate."
     )
-    room_catalog = distinct_rooms(frame).merge(baselines, on="room", how="left")
-    room_catalog["baseline_tariff"] = room_catalog["baseline_tariff"].fillna(0.0)
+    left, right = st.columns([1, 1])
+    with left:
+        st.dataframe(report.room_type_summary, use_container_width=True, hide_index=True)
+    with right:
+        fig = px.bar(
+            report.room_type_summary,
+            x="room_type",
+            y="availability_loss_usd",
+            color="occupancy_pct",
+            title="Availability loss by room type (color = occupancy %)",
+        )
+        fig.update_layout(xaxis_tickangle=-35)
+        st.plotly_chart(fig, use_container_width=True)
+
+with tab_avail:
+    st.dataframe(report.room_availability, use_container_width=True, hide_index=True)
+
+with tab_daily:
+    st.markdown("Use daily tariff vs breakeven to spot dates that need pricing changes.")
+    if report.daily_pricing.empty:
+        st.info("No occupied nights in this period.")
+    else:
+        left, right = st.columns([1, 1])
+        with left:
+            st.dataframe(report.daily_pricing, use_container_width=True, hide_index=True)
+        with right:
+            fig = px.line(
+                report.daily_pricing,
+                x="date",
+                y="avg_tariff",
+                color="room_type",
+                markers=True,
+                title="Daily average tariff by room type",
+            )
+            st.plotly_chart(fig, use_container_width=True)
+            st.caption("Compare avg_tariff to breakeven_per_night in the table to find underpriced dates.")
+
+with tab_breakeven:
+    st.markdown(
+        "Set **breakeven per night (USD)** for each room type. "
+        "All operating expenses should already be included in this number."
+    )
+    catalog = distinct_room_types(frame).merge(breakeven, on="room_type", how="left")
+    catalog["breakeven_per_night"] = catalog["breakeven_per_night"].fillna(0.0)
     edited = st.data_editor(
-        room_catalog[["category", "room", "baseline_tariff"]],
+        catalog,
         use_container_width=True,
         hide_index=True,
         column_config={
-            "category": st.column_config.TextColumn("Category", disabled=True),
-            "room": st.column_config.TextColumn("Room", disabled=True),
-            "baseline_tariff": st.column_config.NumberColumn(
-                "Baseline USD / night",
+            "room_type": st.column_config.TextColumn("Room type", disabled=True),
+            "breakeven_per_night": st.column_config.NumberColumn(
+                "Breakeven USD / night",
                 min_value=0.0,
                 step=5.0,
                 format="%.2f",
             ),
         },
-        key="baseline_editor",
+        key="breakeven_editor",
     )
-    if st.button("Save baselines"):
-        to_save = edited[["room", "baseline_tariff"]].copy()
-        saved_path = save_baselines(to_save, baseline_path)
-        load_baseline_data.clear()
-        st.success(f"Saved baselines to {saved_path}")
+    if st.button("Save breakeven rates"):
+        saved_path = save_breakeven(edited, breakeven_path)
+        load_breakeven_data.clear()
+        st.success(f"Saved breakeven rates to {saved_path}")
         st.rerun()
 
 with tab_detail:
@@ -142,21 +145,16 @@ with tab_detail:
         "res_no",
         "category",
         "room",
-        "market_segment",
-        "guest_status",
         "arrive",
         "depart",
-        "nights",
+        "period_nights",
         "tariff",
-        "baseline_tariff",
+        "breakeven_per_night",
         "revenue_actual",
-        "revenue_baseline",
-        "loss_usd",
+        "breakeven_revenue",
+        "pricing_loss_usd",
+        "market_segment",
         "pax",
-        "travel_agent",
-        "company",
-        "main_bill_amount",
-        "settlement",
     ]
     visible = [c for c in display_cols if c in report.reservations.columns]
     st.dataframe(
@@ -166,8 +164,8 @@ with tab_detail:
     )
 
 st.download_button(
-    "Download period CSV (no guest names)",
-    data=report.reservations.to_csv(index=False).encode("utf-8"),
-    file_name=f"reservations_{period.value}.csv",
+    "Download availability report CSV",
+    data=report.room_availability.to_csv(index=False).encode("utf-8"),
+    file_name=f"availability_{period.value}.csv",
     mime="text/csv",
 )
