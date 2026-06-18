@@ -4,6 +4,7 @@ from analysis.availability import build_availability_summary, build_daily_pricin
 from analysis.breakeven import DEFAULT_BREAKEVEN_PATH, load_breakeven, save_breakeven
 from analysis.data_loader import load_merged_reservations
 from analysis.metrics import AnalysisReport, build_report, build_all_period_reports, distinct_room_types
+from analysis.pdf_report import build_pdf_report
 from analysis.periods import (
     DateRangeMode,
     DateWindow,
@@ -24,7 +25,7 @@ __all__ = [
     "build_report",
     "build_all_period_reports",
     "build_availability_summary",
-    "build_daily_pricing",
+    "build_pdf_report",
     "Period",
     "DateRangeMode",
     "DateWindow",

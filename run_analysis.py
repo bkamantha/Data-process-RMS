@@ -10,6 +10,7 @@ from pathlib import Path
 from analysis.breakeven import DEFAULT_BREAKEVEN_PATH, load_breakeven
 from analysis.data_loader import load_merged_reservations
 from analysis.metrics import build_all_period_reports, build_report
+from analysis.pdf_report import build_pdf_report
 from analysis.periods import Period
 
 

@@ -44,6 +44,7 @@ python -m streamlit run app.py
 **Sidebar options:**
 - **Input source:** default files, upload CSV, or enter file paths
 - **Date range:** presets (6m / 1m / 1w), pick a week, pick a month, or custom calendar range
+- **Download:** full report as **PDF** or availability data as **CSV**
 
 ## Breakeven & loss model
 

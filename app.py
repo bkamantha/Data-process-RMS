@@ -13,6 +13,7 @@ import streamlit as st
 from analysis.breakeven import DEFAULT_BREAKEVEN_PATH, load_breakeven, save_breakeven
 from analysis.data_loader import load_merged_reservations
 from analysis.metrics import build_report, distinct_room_types
+from analysis.pdf_report import build_pdf_report
 from analysis.periods import (
     DateRangeMode,
     DateWindow,
@@ -568,9 +569,18 @@ with tab_detail:
         hide_index=True,
     )
 
-st.download_button(
-    "Download availability report CSV",
-    data=report.room_availability.to_csv(index=False).encode("utf-8"),
-    file_name=f"availability_{report.window.start.strftime('%Y%m%d')}_{report.window.end.strftime('%Y%m%d')}.csv",
-    mime="text/csv",
-)
+dl1, dl2 = st.columns(2)
+with dl1:
+    st.download_button(
+        "Download full report (PDF)",
+        data=build_pdf_report(report),
+        file_name=f"report_{report.window.start.strftime('%Y%m%d')}_{report.window.end.strftime('%Y%m%d')}.pdf",
+        mime="application/pdf",
+    )
+with dl2:
+    st.download_button(
+        "Download availability report (CSV)",
+        data=report.room_availability.to_csv(index=False).encode("utf-8"),
+        file_name=f"availability_{report.window.start.strftime('%Y%m%d')}_{report.window.end.strftime('%Y%m%d')}.csv",
+        mime="text/csv",
+    )
