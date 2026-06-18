@@ -13,6 +13,8 @@ CsvSource = Union[str, Path, BinaryIO]
 
 DATE_FORMAT = "%d %b %Y"
 
+EXCLUDED_ROOM_TYPES = frozenset({"Conference Rooms"})
+
 CHECKED_OUT_COLUMNS = {
     "Res No": "res_no",
     "Category": "category",
@@ -103,6 +105,7 @@ def load_merged_reservations(
 
     merged["has_tariff"] = merged["tariff"].notna()
     merged["reference_date"] = merged["arrive"]
+    merged = merged[~merged["category"].isin(EXCLUDED_ROOM_TYPES)].reset_index(drop=True)
     merged = merged.sort_values(["arrive", "res_no"]).reset_index(drop=True)
     return merged
 
