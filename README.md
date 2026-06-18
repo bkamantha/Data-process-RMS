@@ -41,6 +41,10 @@ python run_analysis.py --period 1_month --output reports/summary.json
 python -m streamlit run app.py
 ```
 
+**Sidebar options:**
+- **Input source:** default files, upload CSV, or enter file paths
+- **Date range:** presets (6m / 1m / 1w), pick a week, pick a month, or custom calendar range
+
 ## Breakeven & loss model
 
 Each **room type** (category) has a `breakeven_per_night` — your minimum rate to cover all expenses.

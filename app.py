@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import date
+from io import BytesIO
 from pathlib import Path
 
 import pandas as pd
@@ -11,7 +13,16 @@ import streamlit as st
 from analysis.breakeven import DEFAULT_BREAKEVEN_PATH, load_breakeven, save_breakeven
 from analysis.data_loader import load_merged_reservations
 from analysis.metrics import build_report, distinct_room_types
-from analysis.periods import Period, reference_end_date
+from analysis.periods import (
+    DateRangeMode,
+    DateWindow,
+    Period,
+    make_date_window,
+    month_bounds,
+    reference_end_date,
+    reference_start_date,
+    resolve_preset_window,
+)
 
 DEFAULT_OUT = Path("data/Checked_Out.csv")
 DEFAULT_IN = Path("data/Checked_In.csv")
@@ -22,8 +33,13 @@ st.caption("Breakeven-based revenue & availability loss across the selected peri
 
 
 @st.cache_data
-def load_data(checked_out: str, checked_in: str) -> pd.DataFrame:
+def load_data_from_paths(checked_out: str, checked_in: str) -> pd.DataFrame:
     return load_merged_reservations(checked_out, checked_in)
+
+
+@st.cache_data
+def load_data_from_uploads(checked_out_bytes: bytes, checked_in_bytes: bytes) -> pd.DataFrame:
+    return load_merged_reservations(BytesIO(checked_out_bytes), BytesIO(checked_in_bytes))
 
 
 @st.cache_data
@@ -31,36 +47,160 @@ def load_breakeven_data(path: str) -> pd.DataFrame:
     return load_breakeven(path)
 
 
+@st.cache_data
+def load_breakeven_from_upload(content: bytes) -> pd.DataFrame:
+    frame = pd.read_csv(BytesIO(content))
+    type_col = "room_type" if "room_type" in frame.columns else "category"
+    frame = frame.rename(columns={type_col: "room_type"})
+    frame["breakeven_per_night"] = pd.to_numeric(frame["breakeven_per_night"], errors="coerce")
+    return frame.dropna(subset=["room_type", "breakeven_per_night"])[["room_type", "breakeven_per_night"]]
+
+
 def _shorten_room_type(name: str) -> str:
     return name.replace("SBG - ", "").replace(" Apartment", "").replace(" Suite", "")
 
 
+def _parse_date_range(selection) -> tuple[date, date] | None:
+    if isinstance(selection, tuple) and len(selection) == 2:
+        return selection[0], selection[1]
+    if isinstance(selection, date):
+        return selection, selection
+    return None
+
+
 with st.sidebar:
-    st.header("Inputs")
-    checked_out_path = st.text_input("Checked Out CSV", value=str(DEFAULT_OUT))
-    checked_in_path = st.text_input("Checked In CSV", value=str(DEFAULT_IN))
-    breakeven_path = st.text_input("Room type breakeven CSV", value=str(DEFAULT_BREAKEVEN_PATH))
-
-    if not Path(checked_out_path).exists() or not Path(checked_in_path).exists():
-        st.error("One or both CSV paths do not exist.")
-        st.stop()
-
-    frame = load_data(checked_out_path, checked_in_path)
-    breakeven = load_breakeven_data(breakeven_path)
-    ref_end = reference_end_date(frame)
-    st.metric("Reservations loaded", len(frame))
-    st.metric("Room types", frame["category"].nunique())
-
-    st.header("Time drill-down")
-    period = st.radio(
-        "Period",
-        options=list(Period),
-        format_func=lambda p: p.label,
+    st.header("Data files")
+    file_source = st.radio(
+        "Input source",
+        options=["Default files", "Upload CSV", "Enter file path"],
         index=0,
     )
-    end_date = st.date_input("Window end date", value=ref_end.date())
 
-report = build_report(frame, period, end_date=end_date, breakeven=breakeven)
+    checked_out_path = str(DEFAULT_OUT)
+    checked_in_path = str(DEFAULT_IN)
+    breakeven_path = str(DEFAULT_BREAKEVEN_PATH)
+    uploaded_out = uploaded_in = uploaded_breakeven = None
+
+    if file_source == "Upload CSV":
+        uploaded_out = st.file_uploader("Checked Out CSV", type=["csv"])
+        uploaded_in = st.file_uploader("Checked In CSV", type=["csv"])
+        uploaded_breakeven = st.file_uploader(
+            "Room type breakeven CSV (optional)",
+            type=["csv"],
+            help="Uses data/room_type_breakeven.csv if not uploaded",
+        )
+        if not uploaded_out or not uploaded_in:
+            st.info("Upload both Checked Out and Checked In CSV files to continue.")
+            st.stop()
+    elif file_source == "Enter file path":
+        checked_out_path = st.text_input("Checked Out CSV path", value=str(DEFAULT_OUT))
+        checked_in_path = st.text_input("Checked In CSV path", value=str(DEFAULT_IN))
+        breakeven_path = st.text_input("Breakeven CSV path", value=str(DEFAULT_BREAKEVEN_PATH))
+        if not Path(checked_out_path).exists() or not Path(checked_in_path).exists():
+            st.error("One or more file paths do not exist.")
+            st.stop()
+    else:
+        checked_out_path = str(DEFAULT_OUT)
+        checked_in_path = str(DEFAULT_IN)
+        breakeven_path = str(DEFAULT_BREAKEVEN_PATH)
+        if not Path(checked_out_path).exists() or not Path(checked_in_path).exists():
+            st.error("Default CSV files not found in data/. Use upload or enter a path.")
+            st.stop()
+
+    if file_source == "Upload CSV":
+        frame = load_data_from_uploads(uploaded_out.getvalue(), uploaded_in.getvalue())
+        if uploaded_breakeven:
+            breakeven = load_breakeven_from_upload(uploaded_breakeven.getvalue())
+        else:
+            breakeven = load_breakeven_data(breakeven_path) if Path(breakeven_path).exists() else pd.DataFrame(
+                columns=["room_type", "breakeven_per_night"]
+            )
+    else:
+        frame = load_data_from_paths(checked_out_path, checked_in_path)
+        breakeven = load_breakeven_data(breakeven_path) if Path(breakeven_path).exists() else load_breakeven(breakeven_path)
+
+    data_min = reference_start_date(frame).date()
+    data_max = reference_end_date(frame).date()
+    st.metric("Reservations loaded", len(frame))
+    st.metric("Room types", frame["category"].nunique())
+    st.caption(f"Data dates: {data_min.strftime('%d %b %Y')} – {data_max.strftime('%d %b %Y')}")
+
+    st.header("Date range")
+    range_mode = st.radio(
+        "Selection mode",
+        options=list(DateRangeMode),
+        format_func=lambda m: {
+            DateRangeMode.PRESET: "Preset (6m / 1m / 1w)",
+            DateRangeMode.WEEK: "Pick a week (calendar)",
+            DateRangeMode.MONTH: "Pick a month (calendar)",
+            DateRangeMode.CUSTOM: "Custom range (calendar)",
+        }[m],
+        index=0,
+    )
+
+    analysis_window: DateWindow | None = None
+
+    if range_mode == DateRangeMode.PRESET:
+        period = st.radio(
+            "Preset period",
+            options=[Period.SIX_MONTHS, Period.ONE_MONTH, Period.ONE_WEEK],
+            format_func=lambda p: p.label,
+            index=0,
+        )
+        end_date = st.date_input(
+            "Window end date",
+            value=data_max,
+            min_value=data_min,
+            max_value=data_max,
+        )
+        analysis_window = resolve_preset_window(frame, period, end_date=end_date)
+
+    elif range_mode == DateRangeMode.WEEK:
+        st.caption("Click start and end on the calendar to define a week (or any 7-day span).")
+        week_selection = st.date_input(
+            "Select week",
+            value=(data_max, data_max),
+            min_value=data_min,
+            max_value=data_max,
+            selection_mode="range",
+        )
+        parsed = _parse_date_range(week_selection)
+        if parsed is None:
+            st.warning("Select a start and end date on the calendar.")
+            st.stop()
+        week_start, week_end = parsed
+        analysis_window = make_date_window(week_start, week_end, range_mode=DateRangeMode.WEEK)
+
+    elif range_mode == DateRangeMode.MONTH:
+        st.caption("Pick any date in the month — the full calendar month is used.")
+        month_anchor = st.date_input(
+            "Select month",
+            value=data_max.replace(day=1),
+            min_value=data_min,
+            max_value=data_max,
+        )
+        month_start, month_end = month_bounds(month_anchor.year, month_anchor.month)
+        clamped_start = max(month_start.date(), data_min)
+        clamped_end = min(month_end.date(), data_max)
+        analysis_window = make_date_window(clamped_start, clamped_end, range_mode=DateRangeMode.MONTH)
+
+    else:
+        st.caption("Click two dates on the calendar for your custom range.")
+        custom_selection = st.date_input(
+            "Select date range",
+            value=(data_min, data_max),
+            min_value=data_min,
+            max_value=data_max,
+            selection_mode="range",
+        )
+        parsed = _parse_date_range(custom_selection)
+        if parsed is None:
+            st.warning("Select a start and end date on the calendar.")
+            st.stop()
+        custom_start, custom_end = parsed
+        analysis_window = make_date_window(custom_start, custom_end, range_mode=DateRangeMode.CUSTOM)
+
+report = build_report(frame, window=analysis_window, breakeven=breakeven)
 type_summary = report.room_type_summary.copy()
 type_summary["room_type_short"] = type_summary["room_type"].map(_shorten_room_type)
 
@@ -401,6 +541,7 @@ with tab_breakeven:
     if st.button("Save breakeven rates"):
         saved_path = save_breakeven(edited, breakeven_path)
         load_breakeven_data.clear()
+        load_breakeven_from_upload.clear()
         st.success(f"Saved breakeven rates to {saved_path}")
         st.rerun()
 
@@ -430,6 +571,6 @@ with tab_detail:
 st.download_button(
     "Download availability report CSV",
     data=report.room_availability.to_csv(index=False).encode("utf-8"),
-    file_name=f"availability_{period.value}.csv",
+    file_name=f"availability_{report.window.start.strftime('%Y%m%d')}_{report.window.end.strftime('%Y%m%d')}.csv",
     mime="text/csv",
 )

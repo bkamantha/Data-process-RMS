@@ -5,9 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Iterable
+from typing import BinaryIO, Iterable, Union
 
 import pandas as pd
+
+CsvSource = Union[str, Path, BinaryIO]
 
 DATE_FORMAT = "%d %b %Y"
 
@@ -54,8 +56,8 @@ def _parse_dates(frame: pd.DataFrame) -> pd.DataFrame:
     return frame
 
 
-def _read_checked_out(path: Path) -> pd.DataFrame:
-    frame = pd.read_csv(path, dtype={"Res No": str})
+def _read_checked_out(source: CsvSource) -> pd.DataFrame:
+    frame = pd.read_csv(source, dtype={"Res No": str})
     frame = frame.rename(columns={k: v for k, v in CHECKED_OUT_COLUMNS.items() if k in frame.columns})
     frame = frame.drop(columns=[c for c in frame.columns if c.lower() == "guest" or c.startswith("Unnamed")], errors="ignore")
     for column in ("main_bill_amount", "extra_bill_amount"):
@@ -64,8 +66,8 @@ def _read_checked_out(path: Path) -> pd.DataFrame:
     return _parse_dates(frame)
 
 
-def _read_checked_in(path: Path) -> pd.DataFrame:
-    frame = pd.read_csv(path, dtype={"Res No": str})
+def _read_checked_in(source: CsvSource) -> pd.DataFrame:
+    frame = pd.read_csv(source, dtype={"Res No": str})
     frame = frame.rename(columns={k: v for k, v in CHECKED_IN_COLUMNS.items() if k in frame.columns})
     frame = frame.drop(columns=[c for c in frame.columns if c.lower() == "guest"], errors="ignore")
     if "tariff" in frame.columns:
@@ -74,15 +76,16 @@ def _read_checked_in(path: Path) -> pd.DataFrame:
 
 
 def load_merged_reservations(
-    checked_out_path: str | Path,
-    checked_in_path: str | Path,
+    checked_out_source: CsvSource,
+    checked_in_source: CsvSource,
 ) -> pd.DataFrame:
     """
     Merge exports on Res No. Guest names are excluded from the merged dataset.
     Checked-in rows contribute tariff and pax; checked-out rows supply billing fields.
+    Sources may be file paths or uploaded file buffers.
     """
-    out = _read_checked_out(Path(checked_out_path))
-    inn = _read_checked_in(Path(checked_in_path))
+    out = _read_checked_out(checked_out_source)
+    inn = _read_checked_in(checked_in_source)
 
     tariff_cols = [c for c in ("tariff", "pax", "travel_agent", "company", "nationality") if c in inn.columns]
     inn_subset = inn[["res_no", *tariff_cols]].drop_duplicates(subset=["res_no"])

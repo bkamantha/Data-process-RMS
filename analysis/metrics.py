@@ -13,7 +13,7 @@ from analysis.availability import (
     window_day_count,
 )
 from analysis.breakeven import apply_reservation_metrics, attach_breakeven, load_breakeven
-from analysis.periods import DateWindow, Period, resolve_period
+from analysis.periods import DateRangeMode, DateWindow, Period, resolve_preset_window
 
 
 @dataclass
@@ -62,7 +62,8 @@ def _reservations_in_window(frame: pd.DataFrame, window: DateWindow) -> pd.DataF
 
 def build_report(
     frame: pd.DataFrame,
-    period: Period,
+    window: DateWindow | None = None,
+    period: Period | None = Period.SIX_MONTHS,
     end_date=None,
     breakeven: pd.DataFrame | None = None,
     breakeven_path: str | None = None,
@@ -71,7 +72,8 @@ def build_report(
         breakeven = load_breakeven(breakeven_path)
 
     enriched = attach_breakeven(frame, breakeven)
-    _, window = resolve_period(enriched, period, end_date=end_date)
+    if window is None:
+        window = resolve_preset_window(enriched, period or Period.SIX_MONTHS, end_date=end_date)
     period_days = window_day_count(window.start, window.end)
 
     period_reservations = _reservations_in_window(enriched, window)
@@ -113,9 +115,15 @@ def build_all_period_reports(
 ) -> dict[Period, AnalysisReport]:
     if breakeven is None:
         breakeven = load_breakeven(breakeven_path)
+    preset_periods = [p for p in Period if p != Period.CUSTOM]
     return {
-        period: build_report(frame, period, end_date=end_date, breakeven=breakeven)
-        for period in Period
+        period: build_report(
+            frame,
+            period=period,
+            end_date=end_date,
+            breakeven=breakeven,
+        )
+        for period in preset_periods
     }
 
 
