@@ -4,7 +4,7 @@ Hotel reservation analysis framework for RMS **Checked Out** and **Checked In** 
 
 ## Features
 
-- Merges both CSV files on **Res No** (guest names excluded)
+- Merges both CSV files on **Res No** (guest names excluded); **Conference Rooms** excluded
 - **Room-type breakeven** rates (expenses already included) per category
 - **Availability loss** = vacant nights × breakeven — measures revenue lost from empty rooms in the period
 - **Pricing loss** = nights sold below breakeven rate
