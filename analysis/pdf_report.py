@@ -158,10 +158,16 @@ def build_pdf_report(report: "AnalysisReport", mcp_summary: "MCPSummary | None" 
         ["Vacant nights", str(report.total_vacant_nights)],
         ["Occupancy", f"{(report.total_room_nights / report.total_available_nights * 100):.1f}%"
          if report.total_available_nights else "N/A"],
-        ["Availability loss", _money(report.total_availability_loss_usd)],
+        ["Occupancy", f"{report.occupancy_pct}%"],
         ["Pricing loss", _money(report.total_pricing_loss_usd)],
-        ["Total loss", _money(report.total_loss_usd)],
     ]
+    if report.include_availability_loss:
+        summary_rows.extend(
+            [
+                ["Availability loss", _money(report.total_availability_loss_usd)],
+                ["Total loss", _money(report.total_loss_usd)],
+            ]
+        )
     summary_table = Table(summary_rows, colWidths=[2.8 * inch, 2.2 * inch])
     summary_table.setStyle(
         TableStyle(
@@ -208,13 +214,17 @@ def build_pdf_report(report: "AnalysisReport", mcp_summary: "MCPSummary | None" 
         "Occupied vs vacant nights",
     )
     loss_labels, loss_values = [], []
-    if report.total_availability_loss_usd > 0:
-        loss_labels.append("Availability")
-        loss_values.append(report.total_availability_loss_usd)
-    if report.total_pricing_loss_usd > 0:
+    if report.include_availability_loss:
+        if report.total_availability_loss_usd > 0:
+            loss_labels.append("Availability")
+            loss_values.append(report.total_availability_loss_usd)
+        if report.total_pricing_loss_usd > 0:
+            loss_labels.append("Pricing")
+            loss_values.append(report.total_pricing_loss_usd)
+    elif report.total_pricing_loss_usd > 0:
         loss_labels.append("Pricing")
         loss_values.append(report.total_pricing_loss_usd)
-    loss_fig = _pie_chart(loss_labels, loss_values, "Total loss breakdown (USD)")
+    loss_fig = _pie_chart(loss_labels, loss_values, "Loss breakdown (USD)" if loss_labels else "No USD loss")
 
     type_summary = report.room_type_summary.copy()
     type_summary["room_type_short"] = type_summary["room_type"].map(_shorten_room_type)
@@ -249,9 +259,17 @@ def build_pdf_report(report: "AnalysisReport", mcp_summary: "MCPSummary | None" 
 
     avail_loss_fig = _bar_chart(
         type_summary["room_type_short"].tolist(),
-        type_summary["availability_loss_usd"].tolist(),
-        "Availability loss by room type (USD)",
-        "USD",
+        (
+            type_summary["availability_loss_usd"].tolist()
+            if report.include_availability_loss
+            else type_summary["vacant_nights"].tolist()
+        ),
+        (
+            "Availability loss by room type (USD)"
+            if report.include_availability_loss
+            else "Vacant nights by room type"
+        ),
+        "USD" if report.include_availability_loss else "Nights",
     )
     occupancy_fig = _bar_chart(
         type_summary["room_type_short"].tolist(),

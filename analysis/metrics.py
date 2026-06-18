@@ -31,6 +31,13 @@ class AnalysisReport:
     room_availability: pd.DataFrame
     daily_pricing: pd.DataFrame
     reservations: pd.DataFrame
+    include_availability_loss: bool = False
+
+    @property
+    def occupancy_pct(self) -> float:
+        if self.total_available_nights <= 0:
+            return 0.0
+        return round(self.total_room_nights / self.total_available_nights * 100, 1)
 
     def to_dict(self) -> dict:
         return {
@@ -48,6 +55,8 @@ class AnalysisReport:
             "total_pricing_loss_usd": round(self.total_pricing_loss_usd, 2),
             "total_availability_loss_usd": round(self.total_availability_loss_usd, 2),
             "total_loss_usd": round(self.total_loss_usd, 2),
+            "include_availability_loss": self.include_availability_loss,
+            "occupancy_pct": self.occupancy_pct,
             "room_type_summary": self.room_type_summary.to_dict(orient="records"),
             "room_availability": self.room_availability.to_dict(orient="records"),
             "daily_pricing": self.daily_pricing.to_dict(orient="records"),
@@ -68,6 +77,7 @@ def build_report(
     end_date=None,
     breakeven: pd.DataFrame | None = None,
     breakeven_path: str | None = None,
+    include_availability_loss: bool = False,
 ) -> AnalysisReport:
     if breakeven is None:
         breakeven = load_breakeven(breakeven_path)
@@ -98,6 +108,7 @@ def build_report(
         breakeven=breakeven,
         window_start=window.start,
         window_end=window.end,
+        include_availability_loss=include_availability_loss,
     )
     room_type_summary = build_room_type_availability(room_availability)
     daily_pricing = build_daily_pricing(period_reservations, window.start, window.end)
@@ -117,6 +128,7 @@ def build_report(
         room_availability=room_availability,
         daily_pricing=daily_pricing,
         reservations=period_reservations,
+        include_availability_loss=include_availability_loss,
     )
 
 

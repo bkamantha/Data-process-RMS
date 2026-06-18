@@ -55,6 +55,7 @@ def build_availability_summary(
     breakeven: pd.DataFrame,
     window_start: pd.Timestamp,
     window_end: pd.Timestamp,
+    include_availability_loss: bool = False,
 ) -> pd.DataFrame:
     inventory = build_room_inventory(full_frame)
     period_days = window_day_count(window_start, window_end)
@@ -72,6 +73,8 @@ def build_availability_summary(
     ).round(1)
     summary["availability_loss_usd"] = summary["vacant_nights"] * summary["breakeven_per_night"].fillna(0)
     summary["breakeven_revenue_target"] = summary["available_nights"] * summary["breakeven_per_night"].fillna(0)
+    if not include_availability_loss:
+        summary["availability_loss_usd"] = 0.0
     summary["total_loss_usd"] = summary["pricing_loss_usd"] + summary["availability_loss_usd"]
 
     return summary.sort_values(["room_type", "room"]).reset_index(drop=True)

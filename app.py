@@ -206,7 +206,19 @@ with st.sidebar:
     use_mcp = st.checkbox("Use Mathematics MCP for calculations", value=True)
     mcp_url = st.text_input("MCP URL", value=DEFAULT_MATHEMATICS_MCP_URL)
 
-report = build_report(frame, window=analysis_window, breakeven=breakeven)
+    st.header("Loss metrics")
+    include_availability_loss = st.checkbox(
+        "Include availability loss (USD)",
+        value=False,
+        help="Off by default. Uses vacant nights × breakeven. Usually dominates pricing loss and looks ~100% on charts.",
+    )
+
+report = build_report(
+    frame,
+    window=analysis_window,
+    breakeven=breakeven,
+    include_availability_loss=include_availability_loss,
+)
 mcp_client = MathematicsMCPClient(url=mcp_url) if use_mcp else None
 mcp_summary = enrich_report_with_mcp(report, client=mcp_client, use_mcp=use_mcp)
 if mcp_summary.mcp_available:
@@ -220,9 +232,18 @@ st.subheader(report.window.label)
 c1, c2, c3, c4, c5 = st.columns(5)
 c1.metric("Period days", report.period_days)
 c2.metric("Occupied nights", report.total_room_nights)
-c3.metric("Vacant nights", report.total_vacant_nights)
-c4.metric("Availability loss", f"${report.total_availability_loss_usd:,.2f}")
-c5.metric("Total loss", f"${report.total_loss_usd:,.2f}")
+c3.metric("Occupancy", f"{report.occupancy_pct}%")
+c4.metric("Vacant nights", report.total_vacant_nights)
+if include_availability_loss:
+    c5.metric("Total loss", f"${report.total_loss_usd:,.2f}")
+else:
+    c5.metric("Pricing loss", f"${report.total_pricing_loss_usd:,.2f}")
+
+if include_availability_loss:
+    st.caption(
+        f"Availability loss: ${report.total_availability_loss_usd:,.2f} · "
+        f"Pricing loss: ${report.total_pricing_loss_usd:,.2f}"
+    )
 
 if mcp_summary.occupancy_pct is not None:
     st.caption(
@@ -259,25 +280,36 @@ with oc1:
     st.plotly_chart(fig, use_container_width=True)
 
 with oc2:
-    loss_pie = pd.DataFrame(
-        {
-            "loss_type": ["Availability loss", "Pricing loss"],
-            "amount": [report.total_availability_loss_usd, report.total_pricing_loss_usd],
-        }
-    )
-    loss_pie = loss_pie[loss_pie["amount"] > 0]
-    if loss_pie.empty:
-        st.info("No loss recorded in this period.")
+    if include_availability_loss:
+        loss_pie = pd.DataFrame(
+            {
+                "loss_type": ["Availability loss", "Pricing loss"],
+                "amount": [report.total_availability_loss_usd, report.total_pricing_loss_usd],
+            }
+        )
+        loss_pie = loss_pie[loss_pie["amount"] > 0]
+        if loss_pie.empty:
+            st.info("No loss recorded in this period.")
+        else:
+            fig = px.pie(
+                loss_pie,
+                values="amount",
+                names="loss_type",
+                title="Total loss breakdown (USD)",
+                color="loss_type",
+                color_discrete_map={"Availability loss": "#e67e22", "Pricing loss": "#9b59b6"},
+            )
+            fig.update_traces(textposition="inside", textinfo="percent+label+value")
+            st.plotly_chart(fig, use_container_width=True)
     else:
         fig = px.pie(
-            loss_pie,
-            values="amount",
-            names="loss_type",
-            title="Total loss breakdown (USD)",
-            color="loss_type",
-            color_discrete_map={"Availability loss": "#e67e22", "Pricing loss": "#9b59b6"},
+            type_summary[type_summary["pricing_loss_usd"] > 0] if type_summary["pricing_loss_usd"].sum() > 0 else type_summary,
+            values="pricing_loss_usd" if type_summary["pricing_loss_usd"].sum() > 0 else "occupied_nights",
+            names="room_type_short",
+            title="Pricing loss by room type (USD)" if type_summary["pricing_loss_usd"].sum() > 0 else "Occupied nights by room type",
+            hole=0.35,
         )
-        fig.update_traces(textposition="inside", textinfo="percent+label+value")
+        fig.update_traces(textposition="inside", textinfo="percent+label")
         st.plotly_chart(fig, use_container_width=True)
 
 with oc3:
@@ -297,31 +329,59 @@ tab_type, tab_avail, tab_daily, tab_breakeven, tab_detail = st.tabs(
 )
 
 with tab_type:
-    st.markdown(
-        "**Loss due to availability** = vacant nights × breakeven. "
-        "**Pricing loss** = nights sold below breakeven rate."
-    )
+    if include_availability_loss:
+        st.markdown(
+            "**Loss due to availability** = vacant nights × breakeven. "
+            "**Pricing loss** = nights sold below breakeven rate."
+        )
+    else:
+        st.markdown(
+            "Showing **occupancy** and **pricing loss** (rates below breakeven). "
+            "Enable availability loss in the sidebar to include vacant-night USD impact."
+        )
     tc1, tc2 = st.columns(2)
     with tc1:
-        fig = px.pie(
-            type_summary[type_summary["availability_loss_usd"] > 0],
-            values="availability_loss_usd",
-            names="room_type_short",
-            title="Availability loss by room type (USD)",
-        )
-        fig.update_traces(textposition="inside", textinfo="percent+label")
-        st.plotly_chart(fig, use_container_width=True)
+        if include_availability_loss:
+            fig = px.pie(
+                type_summary[type_summary["availability_loss_usd"] > 0],
+                values="availability_loss_usd",
+                names="room_type_short",
+                title="Availability loss by room type (USD)",
+            )
+            fig.update_traces(textposition="inside", textinfo="percent+label")
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            fig = px.line(
+                type_summary.sort_values("room_type"),
+                x="room_type_short",
+                y="occupancy_pct",
+                markers=True,
+                title="Occupancy % by room type",
+                labels={"room_type_short": "Room type", "occupancy_pct": "Occupancy %"},
+            )
+            fig.update_layout(xaxis_tickangle=-30)
+            st.plotly_chart(fig, use_container_width=True)
     with tc2:
-        fig = px.line(
-            type_summary.sort_values("room_type"),
-            x="room_type_short",
-            y="occupancy_pct",
-            markers=True,
-            title="Occupancy % by room type",
-            labels={"room_type_short": "Room type", "occupancy_pct": "Occupancy %"},
-        )
-        fig.update_layout(xaxis_tickangle=-30)
-        fig.add_hline(y=100, line_dash="dot", line_color="gray", annotation_text="100%")
+        if include_availability_loss:
+            fig = px.line(
+                type_summary.sort_values("room_type"),
+                x="room_type_short",
+                y="occupancy_pct",
+                markers=True,
+                title="Occupancy % by room type",
+                labels={"room_type_short": "Room type", "occupancy_pct": "Occupancy %"},
+            )
+            fig.update_layout(xaxis_tickangle=-30)
+            fig.add_hline(y=100, line_dash="dot", line_color="gray", annotation_text="100%")
+        else:
+            fig = px.bar(
+                type_summary,
+                x="room_type_short",
+                y="pricing_loss_usd",
+                title="Pricing loss by room type (USD)",
+                labels={"pricing_loss_usd": "USD", "room_type_short": "Room type"},
+            )
+            fig.update_layout(xaxis_tickangle=-30)
         st.plotly_chart(fig, use_container_width=True)
 
     tc3, tc4 = st.columns(2)
@@ -347,28 +407,38 @@ with tab_type:
         fig.update_layout(xaxis_tickangle=-30)
         st.plotly_chart(fig, use_container_width=True)
     with tc4:
-        loss_melt = type_summary.melt(
-            id_vars=["room_type_short"],
-            value_vars=["availability_loss_usd", "pricing_loss_usd"],
-            var_name="loss_type",
-            value_name="amount",
-        )
-        loss_melt["loss_type"] = loss_melt["loss_type"].map(
-            {
-                "availability_loss_usd": "Availability",
-                "pricing_loss_usd": "Pricing",
-            }
-        )
-        fig = px.bar(
-            loss_melt,
-            x="room_type_short",
-            y="amount",
-            color="loss_type",
-            title="Loss comparison by room type (USD)",
-            barmode="stack",
-            labels={"room_type_short": "Room type", "amount": "USD"},
-            color_discrete_map={"Availability": "#e67e22", "Pricing": "#9b59b6"},
-        )
+        if include_availability_loss:
+            loss_melt = type_summary.melt(
+                id_vars=["room_type_short"],
+                value_vars=["availability_loss_usd", "pricing_loss_usd"],
+                var_name="loss_type",
+                value_name="amount",
+            )
+            loss_melt["loss_type"] = loss_melt["loss_type"].map(
+                {
+                    "availability_loss_usd": "Availability",
+                    "pricing_loss_usd": "Pricing",
+                }
+            )
+            fig = px.bar(
+                loss_melt,
+                x="room_type_short",
+                y="amount",
+                color="loss_type",
+                title="Loss comparison by room type (USD)",
+                barmode="stack",
+                labels={"room_type_short": "Room type", "amount": "USD"},
+                color_discrete_map={"Availability": "#e67e22", "Pricing": "#9b59b6"},
+            )
+        else:
+            fig = px.bar(
+                type_summary,
+                x="room_type_short",
+                y="vacant_nights",
+                title="Vacant nights by room type",
+                labels={"vacant_nights": "Nights", "room_type_short": "Room type"},
+                color_discrete_sequence=["#e74c3c"],
+            )
         fig.update_layout(xaxis_tickangle=-30)
         st.plotly_chart(fig, use_container_width=True)
 

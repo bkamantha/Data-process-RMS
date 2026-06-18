@@ -38,6 +38,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Disable Mathematics MCP and use local calculations only",
     )
+    parser.add_argument(
+        "--availability-loss",
+        action="store_true",
+        help="Include availability loss USD (vacant nights × breakeven). Off by default.",
+    )
     return parser.parse_args()
 
 
@@ -48,13 +53,18 @@ def _print_report(report) -> None:
     print(f"Occupied nights: {report.total_room_nights}")
     print(f"Available nights: {report.total_available_nights}")
     print(f"Vacant nights: {report.total_vacant_nights}")
+    print(f"Occupancy: {report.occupancy_pct}%")
     print(f"Pricing loss (below breakeven): ${report.total_pricing_loss_usd:,.2f}")
-    print(f"Availability loss (vacant nights): ${report.total_availability_loss_usd:,.2f}")
-    print(f"Total loss: ${report.total_loss_usd:,.2f}")
+    if report.include_availability_loss:
+        print(f"Availability loss (vacant nights): ${report.total_availability_loss_usd:,.2f}")
+        print(f"Total loss: ${report.total_loss_usd:,.2f}")
     print("\nRoom type summary:")
     print(report.room_type_summary.to_string(index=False))
-    print("\nTop availability loss by room:")
-    top = report.room_availability.nlargest(10, "availability_loss_usd")
+    print("\nTop rooms by vacant nights:")
+    top = report.room_availability.nlargest(10, "vacant_nights")
+    if report.include_availability_loss:
+        print("\nTop rooms by availability loss:")
+        top = report.room_availability.nlargest(10, "availability_loss_usd")
     print(top.to_string(index=False))
 
 
@@ -71,7 +81,12 @@ def main() -> None:
             _print_report(report)
         payload = {p.value: r.to_dict() for p, r in reports.items()}
     else:
-        report = build_report(frame, period=Period(args.period), breakeven=breakeven)
+        report = build_report(
+            frame,
+            period=Period(args.period),
+            breakeven=breakeven,
+            include_availability_loss=args.availability_loss,
+        )
         _print_report(report)
         payload = report.to_dict()
 

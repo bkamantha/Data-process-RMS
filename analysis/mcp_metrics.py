@@ -61,7 +61,10 @@ def enrich_report_with_mcp(
     avg_tariff, avg_tariff_source = statistics_with_fallback(active_client, tariffs, "mean")
     tariff_stdev, tariff_stdev_source = statistics_with_fallback(active_client, tariffs, "stdev")
 
-    loss_expr = f"{report.total_availability_loss_usd} + {report.total_pricing_loss_usd}"
+    if report.include_availability_loss:
+        loss_expr = f"{report.total_availability_loss_usd} + {report.total_pricing_loss_usd}"
+    else:
+        loss_expr = f"{report.total_pricing_loss_usd}"
     verified_loss, verified_loss_source = batch_eval_with_fallback(active_client, [loss_expr])[0]
 
     expressions = [expr for expr in [occupancy_expr, loss_expr] if expr]
