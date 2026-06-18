@@ -9,7 +9,7 @@ Hotel reservation analysis framework for RMS **Checked Out** and **Checked In** 
 - **Availability loss** = vacant nights × breakeven — measures revenue lost from empty rooms in the period
 - **Pricing loss** = nights sold below breakeven rate
 - **Daily pricing** view by date and room type to improve rates
-- Time drill-down: **6 months**, **1 month**, **1 week**
+- **Mathematics MCP** — summary metrics verified via [mathematics.fastmcp.app](https://mathematics.fastmcp.app/mcp)
 
 ## Setup
 
@@ -30,7 +30,7 @@ Place your exports in `data/`:
 ```bash
 python run_analysis.py --period 1_week
 python run_analysis.py --all-periods
-python run_analysis.py --period 1_month --output reports/summary.json
+python run_analysis.py --period 1_month --pdf reports/report.pdf
 ```
 
 **Windows:** `run_analysis.bat --period 1_week`
@@ -45,6 +45,16 @@ python -m streamlit run app.py
 - **Input source:** default files, upload CSV, or enter file paths
 - **Date range:** presets (6m / 1m / 1w), pick a week, pick a month, or custom calendar range
 - **Download:** full report as **PDF** or availability data as **CSV**
+
+## Mathematics MCP
+
+Summary calculations (occupancy %, total loss, tariff mean/stdev) are verified through the **Mathematics MCP** server:
+
+`https://mathematics.fastmcp.app/mcp`
+
+If the MCP server is unreachable, the app falls back to local Python math automatically.
+
+Cursor MCP config is included in `.cursor/mcp.json`.
 
 ## Breakeven & loss model
 

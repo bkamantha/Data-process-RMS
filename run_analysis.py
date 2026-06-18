@@ -10,7 +10,8 @@ from pathlib import Path
 from analysis.breakeven import DEFAULT_BREAKEVEN_PATH, load_breakeven
 from analysis.data_loader import load_merged_reservations
 from analysis.metrics import build_all_period_reports, build_report
-from analysis.pdf_report import build_pdf_report
+from analysis.math_mcp import DEFAULT_MATHEMATICS_MCP_URL, MathematicsMCPClient
+from analysis.mcp_metrics import enrich_report_with_mcp
 from analysis.periods import Period
 
 
@@ -30,6 +31,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--all-periods", action="store_true")
     parser.add_argument("--output", help="Optional JSON output path")
+    parser.add_argument("--pdf", help="Optional PDF report output path")
+    parser.add_argument(
+        "--no-mcp",
+        action="store_true",
+        help="Disable Mathematics MCP and use local calculations only",
+    )
     return parser.parse_args()
 
 
@@ -67,9 +74,26 @@ def main() -> None:
         _print_report(report)
         payload = report.to_dict()
 
+    use_mcp = args.use_mcp and not args.no_mcp
+    mcp_summary = enrich_report_with_mcp(report, use_mcp=use_mcp) if not args.all_periods else None
+    if mcp_summary is not None:
+        print(
+            f"\nMathematics MCP ({DEFAULT_MATHEMATICS_MCP_URL}): "
+            f"connected={mcp_summary.mcp_available}, "
+            f"occupancy={mcp_summary.occupancy_pct}%, "
+            f"verified_total_loss=${mcp_summary.verified_total_loss_usd:,.2f}"
+        )
+        payload["mcp_summary"] = mcp_summary.to_dict()
+
     if args.output:
         Path(args.output).write_text(json.dumps(payload, indent=2), encoding="utf-8")
         print(f"\nWrote {args.output}")
+
+    if args.pdf and not args.all_periods:
+        pdf_path = Path(args.pdf)
+        pdf_path.parent.mkdir(parents=True, exist_ok=True)
+        pdf_path.write_bytes(build_pdf_report(report, mcp_summary=mcp_summary))
+        print(f"Wrote {args.pdf}")
 
 
 if __name__ == "__main__":

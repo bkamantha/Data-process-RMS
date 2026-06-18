@@ -12,6 +12,8 @@ import streamlit as st
 
 from analysis.breakeven import DEFAULT_BREAKEVEN_PATH, load_breakeven, save_breakeven
 from analysis.data_loader import load_merged_reservations
+from analysis.math_mcp import DEFAULT_MATHEMATICS_MCP_URL, MathematicsMCPClient
+from analysis.mcp_metrics import enrich_report_with_mcp
 from analysis.metrics import build_report, distinct_room_types
 from analysis.pdf_report import build_pdf_report
 from analysis.periods import (
@@ -201,7 +203,17 @@ with st.sidebar:
         custom_start, custom_end = parsed
         analysis_window = make_date_window(custom_start, custom_end, range_mode=DateRangeMode.CUSTOM)
 
+    st.header("Mathematics MCP")
+    use_mcp = st.checkbox("Use Mathematics MCP for calculations", value=True)
+    mcp_url = st.text_input("MCP URL", value=DEFAULT_MATHEMATICS_MCP_URL)
+
 report = build_report(frame, window=analysis_window, breakeven=breakeven)
+mcp_client = MathematicsMCPClient(url=mcp_url) if use_mcp else None
+mcp_summary = enrich_report_with_mcp(report, client=mcp_client, use_mcp=use_mcp)
+if mcp_summary.mcp_available:
+    st.sidebar.success("Mathematics MCP connected")
+else:
+    st.sidebar.warning("Mathematics MCP unavailable — using local fallback")
 type_summary = report.room_type_summary.copy()
 type_summary["room_type_short"] = type_summary["room_type"].map(_shorten_room_type)
 
@@ -212,6 +224,19 @@ c2.metric("Occupied nights", report.total_room_nights)
 c3.metric("Vacant nights", report.total_vacant_nights)
 c4.metric("Availability loss", f"${report.total_availability_loss_usd:,.2f}")
 c5.metric("Total loss", f"${report.total_loss_usd:,.2f}")
+
+if mcp_summary.occupancy_pct is not None:
+    st.caption(
+        f"Mathematics MCP ({mcp_url}): occupancy **{mcp_summary.occupancy_pct:.1f}%** "
+        f"({mcp_summary.occupancy_source}), "
+        f"verified total loss **${mcp_summary.verified_total_loss_usd:,.2f}** "
+        f"({mcp_summary.verified_total_loss_source})"
+        + (
+            f", avg tariff **${mcp_summary.avg_tariff:.2f}** (σ={mcp_summary.tariff_stdev:.2f})"
+            if mcp_summary.avg_tariff is not None
+            else ""
+        )
+    )
 
 st.markdown("### Overview")
 oc1, oc2, oc3 = st.columns(3)
@@ -573,7 +598,7 @@ dl1, dl2 = st.columns(2)
 with dl1:
     st.download_button(
         "Download full report (PDF)",
-        data=build_pdf_report(report),
+        data=build_pdf_report(report, mcp_summary=mcp_summary),
         file_name=f"report_{report.window.start.strftime('%Y%m%d')}_{report.window.end.strftime('%Y%m%d')}.pdf",
         mime="application/pdf",
     )

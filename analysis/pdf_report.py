@@ -15,6 +15,7 @@ from reportlab.platypus import Image, PageBreak, Paragraph, SimpleDocTemplate, S
 
 if TYPE_CHECKING:
     from analysis.metrics import AnalysisReport
+    from analysis.mcp_metrics import MCPSummary
 
 
 def _shorten_room_type(name: str) -> str:
@@ -115,7 +116,7 @@ def _dataframe_table(frame: pd.DataFrame, columns: list[str], max_rows: int | No
     return table
 
 
-def build_pdf_report(report: "AnalysisReport") -> bytes:
+def build_pdf_report(report: "AnalysisReport", mcp_summary: "MCPSummary | None" = None) -> bytes:
     """Build a multi-section PDF for the full analysis report."""
     buffer = BytesIO()
     doc = SimpleDocTemplate(
@@ -175,6 +176,30 @@ def build_pdf_report(report: "AnalysisReport") -> bytes:
     )
     story.append(summary_table)
     story.append(Spacer(1, 0.2 * inch))
+
+    if mcp_summary is not None:
+        story.append(Paragraph("Mathematics MCP verification", heading_style))
+        mcp_rows = [
+            ["Metric", "Value", "Source"],
+            ["MCP connected", "Yes" if mcp_summary.mcp_available else "No", mcp_summary.mcp_url],
+            ["Occupancy %", f"{mcp_summary.occupancy_pct:.2f}" if mcp_summary.occupancy_pct is not None else "N/A", mcp_summary.occupancy_source],
+            ["Verified total loss", _money(mcp_summary.verified_total_loss_usd or 0), mcp_summary.verified_total_loss_source],
+            ["Avg tariff", f"${mcp_summary.avg_tariff:.2f}" if mcp_summary.avg_tariff is not None else "N/A", mcp_summary.avg_tariff_source],
+            ["Tariff stdev", f"{mcp_summary.tariff_stdev:.2f}" if mcp_summary.tariff_stdev is not None else "N/A", mcp_summary.tariff_stdev_source],
+        ]
+        mcp_table = Table(mcp_rows, colWidths=[2.0 * inch, 2.0 * inch, 2.5 * inch])
+        mcp_table.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#34495E")),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                    ("GRID", (0, 0), (-1, -1), 0.25, colors.grey),
+                    ("FONTSIZE", (0, 0), (-1, -1), 8),
+                ]
+            )
+        )
+        story.append(mcp_table)
+        story.append(Spacer(1, 0.15 * inch))
 
     chart_width = 3.6 * inch
     nights_fig = _pie_chart(
