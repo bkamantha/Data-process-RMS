@@ -62,8 +62,9 @@ def _reservations_in_window(frame: pd.DataFrame, window: DateWindow) -> pd.DataF
 
 def build_report(
     frame: pd.DataFrame,
-    window: DateWindow | None = None,
     period: Period | None = Period.SIX_MONTHS,
+    *,
+    window: DateWindow | None = None,
     end_date=None,
     breakeven: pd.DataFrame | None = None,
     breakeven_path: str | None = None,
@@ -119,7 +120,7 @@ def build_all_period_reports(
     return {
         period: build_report(
             frame,
-            period=period,
+            period,
             end_date=end_date,
             breakeven=breakeven,
         )

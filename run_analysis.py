@@ -12,6 +12,7 @@ from analysis.data_loader import load_merged_reservations
 from analysis.metrics import build_all_period_reports, build_report
 from analysis.math_mcp import DEFAULT_MATHEMATICS_MCP_URL, MathematicsMCPClient
 from analysis.mcp_metrics import enrich_report_with_mcp
+from analysis.pdf_report import build_pdf_report
 from analysis.periods import Period
 
 
@@ -74,7 +75,7 @@ def main() -> None:
         _print_report(report)
         payload = report.to_dict()
 
-    use_mcp = args.use_mcp and not args.no_mcp
+    use_mcp = not args.no_mcp
     mcp_summary = enrich_report_with_mcp(report, use_mcp=use_mcp) if not args.all_periods else None
     if mcp_summary is not None:
         print(
