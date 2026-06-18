@@ -15,6 +15,8 @@ Hotel reservation analysis framework for RMS **Checked Out** and **Checked In** 
 pip install -r requirements.txt
 ```
 
+On **Windows**, if `streamlit` is not recognized, use `python -m streamlit` instead (see Dashboard below), or double-click `run_dashboard.bat`.
+
 Place your exports in `data/` (sample files are included):
 
 - `data/Checked_Out.csv`
@@ -36,11 +38,15 @@ python run_analysis.py --all-periods
 python run_analysis.py --all-periods --output reports/summary.json
 ```
 
+**Windows shortcut:** `run_analysis.bat` or `run_analysis.bat --period 1_week`
+
 ## Dashboard
 
 ```bash
-streamlit run app.py
+python -m streamlit run app.py
 ```
+
+**Windows shortcut:** double-click `run_dashboard.bat`
 
 Use the sidebar to switch between **Last 6 months**, **Last 1 month**, and **Last 1 week**, and adjust the window end date.
 
