@@ -15,7 +15,6 @@ from analysis.data_loader import load_merged_reservations
 from analysis.math_mcp import DEFAULT_MATHEMATICS_MCP_URL, MathematicsMCPClient
 from analysis.mcp_metrics import enrich_report_with_mcp
 from analysis.metrics import build_report, distinct_room_types
-from analysis.pdf_report import build_pdf_report
 from analysis.periods import (
     DateRangeMode,
     DateWindow,
@@ -596,12 +595,18 @@ with tab_detail:
 
 dl1, dl2 = st.columns(2)
 with dl1:
-    st.download_button(
-        "Download full report (PDF)",
-        data=build_pdf_report(report, mcp_summary=mcp_summary),
-        file_name=f"report_{report.window.start.strftime('%Y%m%d')}_{report.window.end.strftime('%Y%m%d')}.pdf",
-        mime="application/pdf",
-    )
+    try:
+        from analysis.pdf_report import build_pdf_report
+
+        pdf_bytes = build_pdf_report(report, mcp_summary=mcp_summary)
+        st.download_button(
+            "Download full report (PDF)",
+            data=pdf_bytes,
+            file_name=f"report_{report.window.start.strftime('%Y%m%d')}_{report.window.end.strftime('%Y%m%d')}.pdf",
+            mime="application/pdf",
+        )
+    except ModuleNotFoundError:
+        st.warning("Install PDF dependencies: `pip install reportlab matplotlib`")
 with dl2:
     st.download_button(
         "Download availability report (CSV)",

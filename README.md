@@ -17,6 +17,8 @@ Hotel reservation analysis framework for RMS **Checked Out** and **Checked In** 
 pip install -r requirements.txt
 ```
 
+Windows: double-click `install_requirements.bat` if PDF or Streamlit packages are missing.
+
 On **Windows**, use `python -m streamlit run app.py` or double-click `run_dashboard.bat`.
 
 Place your exports in `data/`:

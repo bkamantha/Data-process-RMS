@@ -62,7 +62,7 @@ def _reservations_in_window(frame: pd.DataFrame, window: DateWindow) -> pd.DataF
 
 def build_report(
     frame: pd.DataFrame,
-    period: Period | None = Period.SIX_MONTHS,
+    period: Period | DateWindow | None = None,
     *,
     window: DateWindow | None = None,
     end_date=None,
@@ -72,9 +72,21 @@ def build_report(
     if breakeven is None:
         breakeven = load_breakeven(breakeven_path)
 
+    # Backward compatibility: older callers passed Period as the `window` argument.
+    if isinstance(window, Period):
+        period = window
+        window = None
+    if isinstance(period, DateWindow):
+        window = period
+        period = None
+    if period is None:
+        period = Period.SIX_MONTHS
+
     enriched = attach_breakeven(frame, breakeven)
     if window is None:
-        window = resolve_preset_window(enriched, period or Period.SIX_MONTHS, end_date=end_date)
+        window = resolve_preset_window(enriched, period, end_date=end_date)
+    elif not isinstance(window, DateWindow):
+        raise TypeError(f"window must be a DateWindow, got {type(window).__name__}")
     period_days = window_day_count(window.start, window.end)
 
     period_reservations = _reservations_in_window(enriched, window)

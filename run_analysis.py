@@ -71,7 +71,7 @@ def main() -> None:
             _print_report(report)
         payload = {p.value: r.to_dict() for p, r in reports.items()}
     else:
-        report = build_report(frame, Period(args.period), breakeven=breakeven)
+        report = build_report(frame, period=Period(args.period), breakeven=breakeven)
         _print_report(report)
         payload = report.to_dict()
 
